@@ -1,0 +1,4 @@
+.vscode/
+cs336_basics.egg-info/
+cs336_basics/__pycache__/
+tests/__pycache__/ 
