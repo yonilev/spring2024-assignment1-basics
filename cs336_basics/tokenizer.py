@@ -4,9 +4,10 @@
 BPE (Byte Pair Encoding) tokenizer implementation.
 """
 
+import json
 import regex as re
 from collections import defaultdict
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional, Iterable, Iterator
 from tqdm import tqdm
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -137,3 +138,168 @@ def train_bpe(
                     bigram_to_tokens[bigram].add(token)
     
     return vocab, merges
+
+
+class Tokenizer:
+    """
+    BPE (Byte Pair Encoding) tokenizer implementation.
+    
+    This tokenizer can encode text into integer IDs and decode integer IDs back to text.
+    It supports user-provided special tokens that are never split.
+    """
+    
+    def __init__(self, vocab: Dict[int, bytes], merges: List[Tuple[bytes, bytes]], special_tokens: Optional[List[str]] = None):
+        """
+        Construct a tokenizer from a given vocabulary, list of merges, and (optionally) a list of special tokens.
+        
+        Args:
+            vocab: dict[int, bytes] - The tokenizer vocabulary, a mapping from int (token ID in the vocabulary)
+                  to bytes (token bytes).
+            merges: list[tuple[bytes, bytes]] - A list of BPE merges. Each list item is a tuple of bytes
+                    (<token1>, <token2>), representing that <token1> was merged with <token2>.
+                    Merges are ordered by order of creation.
+            special_tokens: list[str] | None = None - A list of string special tokens for the tokenizer.
+                           These strings will never be split into multiple tokens, and will always be
+                           kept as a single token.
+        """
+        self.vocab = vocab.copy()
+        self.merges = merges.copy()
+        self.special_tokens = special_tokens or []
+
+        # Add special tokens to vocabulary if they aren't already there
+        for special_token in self.special_tokens:
+            token_bytes = special_token.encode('utf-8')
+            if token_bytes not in self.vocab.values():
+                self.vocab[len(self.vocab)] = token_bytes
+
+        # Create reverse mapping from bytes to token ID
+        self.bytes_to_id = {bytes_val: token_id for token_id, bytes_val in self.vocab.items()}
+        
+        # Create merge index lookup for O(1) access
+        self.merge_to_index = {merge: idx for idx, merge in enumerate(self.merges)}
+    
+    @classmethod
+    def from_files(cls, vocab_filepath: str, merges_filepath: str, special_tokens: Optional[List[str]] = None):
+        """
+        Class method that constructs and returns a Tokenizer from a serialized vocabulary and list of merges.
+        
+        Args:
+            vocab_filepath: str - Path to the vocabulary JSON file.
+            merges_filepath: str - Path to the merges text file.
+            special_tokens: list[str] | None = None - A list of string special tokens for the tokenizer.
+                           These strings will never be split into multiple tokens, and will always be
+                           kept as a single token.
+        
+        Returns:
+            Tokenizer - A tokenizer instance constructed from the provided files.
+        """
+        # Load vocabulary from JSON file
+        with open(vocab_filepath, 'r', encoding='utf-8') as f:
+            vocab_data = json.load(f)
+        
+        # Convert string keys to integers and string values to bytes
+        vocab = {int(i): t.encode('utf-8') for i, t in vocab_data.items()}
+        
+        # Load merges from text file
+        merges = []
+        with open(merges_filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                t1,t2 = line.strip().split()
+                merges.append((t1.encode('utf-8'), t2.encode('utf-8')))
+        
+        return cls(vocab, merges, special_tokens)
+    
+    def _split_with_delimiters(self, text: str, delimiters: list[str]) -> list[str]:
+        if not delimiters:
+            return [text]
+        # Sort by length to handle overlapping tokens
+        pattern = "(" + "|".join(re.escape(tok) for tok in sorted(delimiters, key=len, reverse=True)) + ")"
+        return [seg for seg in re.split(pattern, text) if seg != ""]
+
+    def encode(self, text: str) -> List[int]:
+        """
+        Encode text into a list of integer token IDs.
+        
+        Args:
+            text: str - The text to encode.
+        
+        Returns:
+            list[int] - A list of integer token IDs representing the encoded text.
+        """
+        if not text:
+            return []
+        encoded_ids = []
+        segments = self._split_with_delimiters(text, self.special_tokens)
+        for segment in segments:
+            if segment in self.special_tokens:
+                token_bytes = segment.encode('utf-8')
+                encoded_ids.append(self.bytes_to_id[token_bytes])
+            else:
+                initial_tokens = re.findall(PAT, segment)
+                for token in initial_tokens:
+                    token_bytes = token.encode('utf-8')
+                    byte_tokens = [bytes([b]) for b in token_bytes]
+                    # Apply BPE merges
+                    while len(byte_tokens) > 1:
+                        best_merge = None
+                        best_merge_idx = -1
+                        best_merge_pos = -1
+                        for i in range(len(byte_tokens) - 1):
+                            bigram = (byte_tokens[i], byte_tokens[i + 1])
+                            if bigram in self.merge_to_index:
+                                merge_idx = self.merge_to_index[bigram]
+                                if best_merge is None or merge_idx < best_merge_idx:
+                                    best_merge = bigram
+                                    best_merge_idx = merge_idx
+                                    best_merge_pos = i
+                        if best_merge is None:
+                            break
+                        merged_token = best_merge[0] + best_merge[1]
+                        byte_tokens[best_merge_pos:best_merge_pos+2] = [merged_token]
+                    for byte_token in byte_tokens:
+                        encoded_ids.append(self.bytes_to_id[byte_token])
+        return encoded_ids
+    
+    def decode(self, token_ids: List[int]) -> str:
+        """
+        Decode a list of integer token IDs back to text.
+        
+        Args:
+            token_ids: list[int] - A list of integer token IDs to decode.
+        
+        Returns:
+            str - The decoded text.
+        """
+        if not token_ids:
+            return ""
+        
+        # Convert token IDs to bytes
+        byte_sequence = [self.vocab[token_id] for token_id in token_ids]
+        
+        # Concatenate all bytes
+        all_bytes = b''.join(byte_sequence)
+        
+        # Decode to string
+        try:
+            return all_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            # Fallback: replace invalid bytes with replacement character
+            return all_bytes.decode('utf-8', errors='replace')
+
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+        """
+        Given an iterable of strings (e.g., a Python file handle), return a generator 
+        that lazily yields token IDs. This is required for memory-efficient tokenization 
+        of large files that we cannot directly load into memory.
+        
+        Args:
+            iterable: Iterable[str] - An iterable of strings to tokenize.
+        
+        Yields:
+            int - Token IDs one at a time.
+        """
+        for text in iterable:
+            # Encode each piece of text and yield all token IDs
+            token_ids = self.encode(text)
+            for token_id in token_ids:
+                yield token_id
