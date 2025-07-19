@@ -9,6 +9,7 @@ from cs336_basics.loss import cross_entropy_loss
 from cs336_basics.optimizer import AdamW, gradient_clipping, get_lr_cosine_schedule
 from cs336_basics.checkpoints import save_checkpoint, load_checkpoint
 import logging
+import json
 
 
 def parse_args():
@@ -140,6 +141,21 @@ def main():
         if (it + 1) % args.eval_interval == 0 or (it + 1) == args.max_iters:
             save_checkpoint(model, optimizer, it + 1, args.checkpoint_path)
             logging.info(f"Checkpoint saved at iter {it+1}")
+            # Save model config as JSON
+            config = {
+                "vocab_size": vocab_size,
+                "context_length": args.context_length,
+                "d_model": args.d_model,
+                "num_layers": args.num_layers,
+                "num_heads": args.num_heads,
+                "d_ff": args.d_ff,
+                "attn_pdrop": args.attn_pdrop,
+                "residual_pdrop": args.residual_pdrop,
+            }
+            config_path = args.checkpoint_path + ".config.json"
+            with open(config_path, "w") as f:
+                json.dump(config, f, indent=2)
+            logging.info(f"Model config saved to {config_path}")
 
     logging.info("Training complete.")
 
