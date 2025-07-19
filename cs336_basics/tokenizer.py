@@ -9,6 +9,7 @@ import regex as re
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, Iterable, Iterator
 from tqdm import tqdm
+from tests.common import gpt2_bytes_to_unicode
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
@@ -196,17 +197,20 @@ class Tokenizer:
         # Load vocabulary from JSON file
         with open(vocab_filepath, 'r', encoding='utf-8') as f:
             vocab_data = json.load(f)
-        
-        # Convert string keys to integers and string values to bytes
-        vocab = {int(i): t.encode('utf-8') for i, t in vocab_data.items()}
-        
+        # Invert the GPT-2 byte-to-unicode mapping for decoding
+        byte_to_unicode = gpt2_bytes_to_unicode()
+        unicode_to_byte = {v: k for k, v in byte_to_unicode.items()}
+        vocab = {}
+        for i, t in vocab_data.items():
+            # Map each unicode character back to its original byte
+            byte_seq = bytes([unicode_to_byte[c] for c in t])
+            vocab[int(i)] = byte_seq
         # Load merges from text file
         merges = []
         with open(merges_filepath, 'r', encoding='utf-8') as f:
             for line in f:
                 t1,t2 = line.strip().split()
                 merges.append((t1.encode('utf-8'), t2.encode('utf-8')))
-        
         return cls(vocab, merges, special_tokens)
     
     def _split_with_delimiters(self, text: str, delimiters: list[str]) -> list[str]:

@@ -11,6 +11,8 @@ from cs336_basics.model import CausalMultiHeadSelfAttention, FFN, GELU, RMSNorm,
 from cs336_basics.tokenizer import train_bpe, Tokenizer
 from cs336_basics.loss import cross_entropy_loss
 from cs336_basics.optimizer import AdamW, gradient_clipping, get_lr_cosine_schedule
+from cs336_basics.data_loader import get_batch
+from cs336_basics.checkpoints import save_checkpoint, load_checkpoint
 
 def run_positionwise_feedforward(
     d_model: int,
@@ -428,7 +430,7 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    return get_batch(dataset, batch_size, context_length, device)
 
 
 def run_softmax(in_features: torch.FloatTensor, dim: int) -> torch.Tensor:
@@ -511,19 +513,8 @@ def run_save_checkpoint(
 ):
     """
     Given a model, optimizer, and an iteration number, serialize them to disk.
-
-    Args:
-        model: torch.nn.Module
-            Serialize the state of this model.
-        optimizer: torch.optim.Optimizer,
-            Serialize the state of this optimizer.
-        iteration: int
-            Serialize this value, which represents the number of training iterations
-            we've completed.
-        out: str | os.PathLike | BinaryIO | IO[bytes]
-            Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
+    save_checkpoint(model, optimizer, iteration, out)
 
 
 def run_load_checkpoint(
@@ -536,18 +527,8 @@ def run_load_checkpoint(
     serialized state to the given model and optimizer.
     Return the number of iterations that we previously serialized in
     the checkpoint.
-
-    Args:
-        src: str | os.PathLike | BinaryIO | IO[bytes]
-            Path or file-like object to serialized checkpoint.
-        model: torch.nn.Module
-            Restore the state of this model.
-        optimizer: torch.optim.Optimizer,
-            Restore the state of this optimizer.
-    Returns:
-        int, the previously-serialized number of iterations.
     """
-    raise NotImplementedError
+    return load_checkpoint(src, model, optimizer)
 
 
 def get_tokenizer(
